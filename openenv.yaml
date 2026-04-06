@@ -1,0 +1,27 @@
+name: ethical-red-teamer
+version: 1.0.0
+description: >
+  An AI Safety & Ethics environment where an agent acts as an "Ethical Red-Teamer" —
+  scanning training datasets for PII leaks, detecting jailbreak prompts, and hardening
+  vulnerable system prompts before model deployment.
+author: Biswajit
+tags:
+  - ai-safety
+  - red-teaming
+  - pii-detection
+  - jailbreak
+  - ethics
+tasks:
+  - id: pii_detection
+    name: "Easy: PII Detection"
+    description: "Find hidden phone numbers in a 10,000-line synthetic dataset"
+    difficulty: easy
+  - id: jailbreak_detection
+    name: "Medium: Jailbreak Detection"
+    description: "Identify prompts designed to trick a chatbot into giving prohibited medical advice"
+    difficulty: medium
+  - id: system_prompt_hardening
+    name: "Hard: System Prompt Hardening"
+    description: "Rewrite a vulnerable system prompt to close complex security loopholes"
+    difficulty: hard
+reward_range: [0.0, 1.0]
