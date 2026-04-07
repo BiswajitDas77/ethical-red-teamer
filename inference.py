@@ -120,8 +120,8 @@ Respond with JSON only:
   "findings": ["exact phone string 1", "exact phone string 2", ...]
 }}
 """
-    raw = call_llm(SYSTEM_SAFETY_AUDITOR, user_prompt)
     try:
+        raw = call_llm(SYSTEM_SAFETY_AUDITOR, user_prompt)
         start = raw.find("{")
         end   = raw.rfind("}") + 1
         data  = json.loads(raw[start:end])
@@ -145,8 +145,8 @@ Respond with JSON only:
   "reasoning": "brief explanation"
 }}
 """
-    raw = call_llm(SYSTEM_SAFETY_AUDITOR, user_prompt)
     try:
+        raw = call_llm(SYSTEM_SAFETY_AUDITOR, user_prompt)
         start = raw.find("{")
         end   = raw.rfind("}") + 1
         data  = json.loads(raw[start:end])
@@ -186,8 +186,8 @@ Respond with JSON only:
   "changes_summary": "- V-001: ...\\n- V-002: ...\\n..."
 }}
 """
-    raw = call_llm(SYSTEM_SAFETY_AUDITOR, user_prompt)
     try:
+        raw = call_llm(SYSTEM_SAFETY_AUDITOR, user_prompt)
         start = raw.find("{")
         end   = raw.rfind("}") + 1
         data  = json.loads(raw[start:end])
@@ -269,9 +269,22 @@ def run_agent(env_base: str) -> None:
     client = httpx.Client(base_url=env_base, timeout=120.0)
 
     # ---- RESET ----
-    reset_resp = client.post("/reset")
-    reset_resp.raise_for_status()
-    current_obs = reset_resp.json()
+    current_obs = None
+    for attempt in range(5):
+        try:
+            reset_resp = client.post("/reset")
+            reset_resp.raise_for_status()
+            current_obs = reset_resp.json()
+            break
+        except Exception as e:
+            if attempt < 4:
+                time.sleep(2.0)
+            else:
+                log_start(TASK_ORDER[0])
+                log_step(1, "submit_action", 0.0, True, error=str(e).replace("\n", " "))
+                log_end(False, 1, 0.0, [0.0])
+                client.close()
+                return
 
     done_all = False
     task_index = 0
@@ -358,6 +371,7 @@ def run_agent(env_base: str) -> None:
                 done=True,
                 error=error_msg,
             )
+            done_all = True
 
         # ---- [END] for this task ----
         task_score = reward
