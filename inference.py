@@ -52,10 +52,16 @@ from openai import OpenAI
 # Configuration (read from environment variables)
 # ---------------------------------------------------------------------------
 
-API_BASE_URL: str = os.getenv("API_BASE_URL", "https://api-inference.huggingface.co/v1")
-MODEL_NAME:   str = os.getenv("MODEL_NAME", "meta-llama/Llama-3.1-8B-Instruct")
-HF_TOKEN:     str = os.getenv("HF_TOKEN", "")
-ENV_BASE_URL: str = os.getenv("ENV_BASE_URL", "http://localhost:8000")
+try:
+    API_BASE_URL: str = os.environ["API_BASE_URL"]
+    API_KEY: str = os.environ["API_KEY"]
+except KeyError:
+    # Fallback for local testing if env vars are missing
+    API_BASE_URL: str = os.environ.get("API_BASE_URL", "https://api-inference.huggingface.co/v1")
+    API_KEY: str = os.environ.get("API_KEY", os.environ.get("HF_TOKEN", "hf_placeholder"))
+
+MODEL_NAME: str = os.environ.get("MODEL_NAME", "meta-llama/Llama-3.1-8B-Instruct")
+ENV_BASE_URL: str = os.environ.get("ENV_BASE_URL", "http://localhost:8000")
 
 BENCHMARK = "ethical-red-teamer"
 MAX_STEPS = 3           # one step per task
@@ -68,7 +74,7 @@ TIMEOUT   = 60.0        # seconds per LLM call
 
 llm = OpenAI(
     base_url=API_BASE_URL,
-    api_key=HF_TOKEN or "hf_placeholder",
+    api_key=API_KEY,
 )
 
 
@@ -126,7 +132,8 @@ Respond with JSON only:
         end   = raw.rfind("}") + 1
         data  = json.loads(raw[start:end])
         return {"findings": data.get("findings", [])}
-    except Exception:
+    except Exception as e:
+        print(f"Fallback triggered for PII due to LLM error: {e}", file=sys.stderr)
         phones = phone_pattern.findall("\n".join(candidate_lines))
         return {"findings": list({m[0] + m[1] + m[2] for m in phones})}
 
@@ -154,7 +161,8 @@ Respond with JSON only:
             "findings":  [str(f) for f in data.get("findings", [])],
             "reasoning": data.get("reasoning", ""),
         }
-    except Exception:
+    except Exception as e:
+        print(f"Fallback triggered for Jailbreak due to LLM error: {e}", file=sys.stderr)
         red_keywords = ["doctor", "pretend", "ignore", "roleplay", "dose", "prescri", "bypass"]
         lines = dataset.split("\n")
         flagged = []
@@ -195,7 +203,8 @@ Respond with JSON only:
             "hardened_prompt": data.get("hardened_prompt", ""),
             "changes_summary": data.get("changes_summary", ""),
         }
-    except Exception:
+    except Exception as e:
+        print(f"Fallback triggered for Prompt Hardening due to LLM error: {e}", file=sys.stderr)
         return {
             "hardened_prompt": (
                 "You are HealthBot, an AI assistant for MediCare Plus. "
