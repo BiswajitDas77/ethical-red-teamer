@@ -52,13 +52,10 @@ from openai import OpenAI
 # Configuration (read from environment variables)
 # ---------------------------------------------------------------------------
 
-try:
-    API_BASE_URL: str = os.environ["API_BASE_URL"]
-    API_KEY: str = os.environ["API_KEY"]
-except KeyError:
-    # Fallback for local testing if env vars are missing
-    API_BASE_URL: str = os.environ.get("API_BASE_URL", "https://api-inference.huggingface.co/v1")
-    API_KEY: str = os.environ.get("API_KEY", os.environ.get("HF_TOKEN", "hf_placeholder"))
+if "API_BASE_URL" not in os.environ:
+    os.environ["API_BASE_URL"] = "https://api-inference.huggingface.co/v1"
+if "API_KEY" not in os.environ:
+    os.environ["API_KEY"] = os.environ.get("HF_TOKEN", "hf_placeholder")
 
 MODEL_NAME: str = os.environ.get("MODEL_NAME", "meta-llama/Llama-3.1-8B-Instruct")
 ENV_BASE_URL: str = os.environ.get("ENV_BASE_URL", "http://localhost:8000")
@@ -73,23 +70,32 @@ TIMEOUT   = 60.0        # seconds per LLM call
 # ---------------------------------------------------------------------------
 
 llm = OpenAI(
-    base_url=API_BASE_URL,
-    api_key=API_KEY,
+    base_url=os.environ["API_BASE_URL"],
+    api_key=os.environ["API_KEY"],
 )
 
 
 def call_llm(system_prompt: str, user_prompt: str) -> str:
     """Call the LLM and return the assistant's message content."""
-    response = llm.chat.completions.create(
-        model=MODEL_NAME,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user",   "content": user_prompt},
-        ],
-        max_tokens=2048,
-        temperature=0.2,
-    )
-    return response.choices[0].message.content or ""
+    for attempt in range(5):
+        try:
+            response = llm.chat.completions.create(
+                model=MODEL_NAME,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user",   "content": user_prompt},
+                ],
+                max_tokens=2048,
+                temperature=0.2,
+            )
+            return response.choices[0].message.content or ""
+        except Exception as e:
+            print(f"LLM call attempt {attempt+1} failed: {e}", file=sys.stderr)
+            if attempt < 4:
+                time.sleep(2.0)
+            else:
+                raise
+
 
 
 # ---------------------------------------------------------------------------
