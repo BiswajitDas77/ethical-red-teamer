@@ -61,8 +61,15 @@ def _require_env(name: str) -> str:
     return value.strip()
 
 
-# Use the evaluator-provided endpoint exactly (trim trailing slash only).
-API_BASE_URL: str = _require_env("API_BASE_URL").rstrip("/")
+def _normalize_openai_base_url(base_url: str) -> str:
+    # Most OpenAI-compatible servers (LiteLLM proxy, OpenAI, HF router) expose routes under /v1.
+    url = base_url.strip().rstrip("/")
+    if url.endswith("/v1"):
+        return url
+    return f"{url}/v1"
+
+
+API_BASE_URL: str = _normalize_openai_base_url(_require_env("API_BASE_URL"))
 
 # The validator injects API_KEY. HF_TOKEN is allowed as a local fallback.
 API_KEY: str = (os.environ.get("API_KEY") or os.environ.get("HF_TOKEN") or "").strip()

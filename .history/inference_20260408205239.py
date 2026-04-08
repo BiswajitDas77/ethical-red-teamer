@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import time
 import re
 from typing import List, Optional
@@ -56,19 +57,30 @@ def _require_env(name: str) -> str:
     if value is None or not value.strip():
         raise RuntimeError(
             f"Missing required environment variable: {name}. "
-            "The evaluator injects this at runtime; for local runs, set it in your shell."
+            "The evaluator injects this at runtime; for local runs, export it."
         )
     return value.strip()
 
 
-# Use the evaluator-provided endpoint exactly (trim trailing slash only).
-API_BASE_URL: str = _require_env("API_BASE_URL").rstrip("/")
+def _normalize_openai_base_url(base_url: str) -> str:
+    # The OpenAI Python client expects an OpenAI-compatible endpoint root.
+    # Most proxies (LiteLLM, OpenAI, HF router) serve the API under /v1.
+    url = base_url.strip().rstrip("/")
+    if url.endswith("/v1"):
+        return url
+    return f"{url}/v1"
 
-# The validator injects API_KEY. HF_TOKEN is allowed as a local fallback.
+
+# Mandatory env vars (the evaluator injects these).
+API_BASE_URL: str = _normalize_openai_base_url(_require_env("API_BASE_URL"))
+
+# Some docs mention HF_TOKEN; the validator explicitly checks API_KEY.
+# Prefer API_KEY when present; allow HF_TOKEN as a local-development fallback.
 API_KEY: str = (os.environ.get("API_KEY") or os.environ.get("HF_TOKEN") or "").strip()
 if not API_KEY:
     raise RuntimeError(
-        "Missing required environment variable: API_KEY (or HF_TOKEN for local dev)."
+        "Missing required environment variable: API_KEY (or HF_TOKEN for local dev). "
+        "The evaluator injects API_KEY at runtime."
     )
 
 MODEL_NAME: str = _require_env("MODEL_NAME")
@@ -83,10 +95,7 @@ TIMEOUT   = 60.0        # seconds per LLM call
 # OpenAI-compatible client (required by hackathon rules)
 # ---------------------------------------------------------------------------
 
-llm = OpenAI(
-    base_url=API_BASE_URL,
-    api_key=API_KEY,
-)
+llm = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
 
 
 def call_llm(system_prompt: str, user_prompt: str) -> str:
@@ -104,6 +113,7 @@ def call_llm(system_prompt: str, user_prompt: str) -> str:
             )
             return response.choices[0].message.content or ""
         except Exception as e:
+            print(f"LLM call attempt {attempt+1} failed: {e}", file=sys.stderr)
             if attempt < 4:
                 time.sleep(2.0)
             else:
@@ -152,6 +162,7 @@ Respond with JSON only:
         data  = json.loads(raw[start:end])
         return {"findings": data.get("findings", [])}
     except Exception as e:
+        print(f"Fallback triggered for PII due to LLM error: {e}", file=sys.stderr)
         phones = phone_pattern.findall("\n".join(candidate_lines))
         return {"findings": list({m[0] + m[1] + m[2] for m in phones})}
 
@@ -180,6 +191,7 @@ Respond with JSON only:
             "reasoning": data.get("reasoning", ""),
         }
     except Exception as e:
+        print(f"Fallback triggered for Jailbreak due to LLM error: {e}", file=sys.stderr)
         red_keywords = ["doctor", "pretend", "ignore", "roleplay", "dose", "prescri", "bypass"]
         lines = dataset.split("\n")
         flagged = []
@@ -221,6 +233,7 @@ Respond with JSON only:
             "changes_summary": data.get("changes_summary", ""),
         }
     except Exception as e:
+        print(f"Fallback triggered for Prompt Hardening due to LLM error: {e}", file=sys.stderr)
         return {
             "hardened_prompt": (
                 "You are HealthBot, an AI assistant for MediCare Plus. "
@@ -288,12 +301,7 @@ def run_agent(env_base: str) -> None:
     """
     Main agent loop.
 
-    Supports multi-step tasks with partial progress:
-      - Each task can have multiple steps (up to MAX_STEPS_PER_TASK)
-      - Agent can submit incremental findings and continue (finalize=False)
-      - Agent signals task completion with finalize=True
-      - Partial scores are tracked and best score is used
-
+    Calls reset() once, then steps through all 3 tasks sequentially.
     Each task emits its own [START]/[STEP]/[END] block with score in [0, 1].
     """
     client = httpx.Client(base_url=env_base, timeout=120.0)
@@ -322,116 +330,93 @@ def run_agent(env_base: str) -> None:
     while not done_all and task_index < len(TASK_ORDER):
         task_id = current_obs.get("task_id", TASK_ORDER[task_index])
         action_name = TASK_ACTION_NAMES.get(task_id, "submit_action")
-        max_steps = current_obs.get("max_steps_per_task", 5)
-        current_task_step = 0
 
         # ---- [START] for this task ----
         log_start(task_id)
 
         error_msg: Optional[str] = None
-        best_reward = 0.0
+        reward = 0.0
+        step_done = False
+        action_desc = action_name
         step_rewards: List[float] = []
-        cumulative_findings: List[str] = []
 
-        # Multi-step loop per task
-        task_complete = False
-        while not task_complete and current_task_step < max_steps:
-            current_task_step += 1
-            action_desc = action_name
-            step_reward = 0.0
+        try:
+            # Build the action depending on task
+            action: dict = {"task_id": task_id}
 
-            try:
-                # Build the action depending on task
-                action: dict = {"task_id": task_id}
-
-                if task_id == "pii_detection":
-                    result = agent_pii_detection(
-                        instructions=current_obs.get("instructions", ""),
-                        dataset=current_obs.get("dataset_sample", ""),
-                    )
-                    # Merge new findings with previous
-                    new_findings = result.get("findings", [])
-                    for f in new_findings:
-                        if f not in cumulative_findings:
-                            cumulative_findings.append(f)
-                    action["findings"] = cumulative_findings
-                    action["finalize"] = True  # Complete task on first submission
-                    action_desc = f"submit_pii_findings({len(cumulative_findings)})"
-
-                elif task_id == "jailbreak_detection":
-                    result = agent_jailbreak_detection(
-                        instructions=current_obs.get("instructions", ""),
-                        dataset=current_obs.get("dataset_sample", ""),
-                    )
-                    new_findings = result.get("findings", [])
-                    for f in new_findings:
-                        if f not in cumulative_findings:
-                            cumulative_findings.append(f)
-                    action["findings"] = cumulative_findings
-                    action["reasoning"] = result.get("reasoning", "")
-                    action["finalize"] = True
-                    action_desc = f"submit_jailbreak_findings({len(cumulative_findings)})"
-
-                elif task_id == "system_prompt_hardening":
-                    result = agent_system_prompt_hardening(
-                        instructions=current_obs.get("instructions", ""),
-                        vulnerable_prompt=current_obs.get("system_prompt_to_audit", ""),
-                        red_team_report=current_obs.get("red_team_report", ""),
-                    )
-                    action["hardened_prompt"] = result.get("hardened_prompt", "")
-                    action["changes_summary"] = result.get("changes_summary", "")
-                    action["finalize"] = True
-                    action_desc = "submit_hardened_prompt"
-
-                # Submit the action
-                step_resp = client.post(
-                    "/step",
-                    content=json.dumps(action),
-                    headers={"Content-Type": "application/json"},
+            if task_id == "pii_detection":
+                result = agent_pii_detection(
+                    instructions=current_obs.get("instructions", ""),
+                    dataset=current_obs.get("dataset_sample", ""),
                 )
-                step_resp.raise_for_status()
-                step_result = step_resp.json()
+                action["findings"] = result.get("findings", [])
+                action_desc = f"submit_pii_findings({len(action['findings'])})"
 
-                step_reward = float(step_result.get("reward", 0.0))
-                task_complete = bool(step_result.get("task_complete", True))
-                done_all = bool(step_result.get("done", False))
-
-                step_rewards.append(step_reward)
-                if step_reward > best_reward:
-                    best_reward = step_reward
-
-                # ---- [STEP] ----
-                log_step(
-                    step=current_task_step,
-                    action_str=action_desc,
-                    reward=step_reward,
-                    done=task_complete,
-                    error=error_msg,
+            elif task_id == "jailbreak_detection":
+                result = agent_jailbreak_detection(
+                    instructions=current_obs.get("instructions", ""),
+                    dataset=current_obs.get("dataset_sample", ""),
                 )
+                action["findings"] = result.get("findings", [])
+                action["reasoning"] = result.get("reasoning", "")
+                action_desc = f"submit_jailbreak_findings({len(action['findings'])})"
 
-                # Advance observation for next step or task
-                if not done_all:
-                    current_obs = step_result.get("observation", {})
-
-            except Exception as exc:
-                error_msg = str(exc).replace("\n", " ")
-                step_rewards.append(0.0)
-                log_step(
-                    step=current_task_step,
-                    action_str=action_desc,
-                    reward=0.0,
-                    done=True,
-                    error=error_msg,
+            elif task_id == "system_prompt_hardening":
+                result = agent_system_prompt_hardening(
+                    instructions=current_obs.get("instructions", ""),
+                    vulnerable_prompt=current_obs.get("system_prompt_to_audit", ""),
+                    red_team_report=current_obs.get("red_team_report", ""),
                 )
-                task_complete = True
-                done_all = True
+                action["hardened_prompt"] = result.get("hardened_prompt", "")
+                action["changes_summary"] = result.get("changes_summary", "")
+                action_desc = "submit_hardened_prompt"
+
+            # Submit the action
+            step_resp = client.post(
+                "/step",
+                content=json.dumps(action),
+                headers={"Content-Type": "application/json"},
+            )
+            step_resp.raise_for_status()
+            step_result = step_resp.json()
+
+            reward = float(step_result.get("reward", 0.0))
+            step_done = bool(step_result.get("done", False))
+            done_all = step_done
+
+            step_rewards.append(reward)
+
+            # ---- [STEP] ----
+            log_step(
+                step=1,
+                action_str=action_desc,
+                reward=reward,
+                done=True,  # each task completes in 1 step
+                error=error_msg,
+            )
+
+            # Advance observation for next task
+            if not done_all:
+                current_obs = step_result.get("observation", {})
+
+        except Exception as exc:
+            error_msg = str(exc).replace("\n", " ")
+            step_rewards.append(0.0)
+            log_step(
+                step=1,
+                action_str=action_desc,
+                reward=0.0,
+                done=True,
+                error=error_msg,
+            )
+            done_all = True
 
         # ---- [END] for this task ----
-        task_score = best_reward
+        task_score = reward
         task_success = task_score > 0.0
         log_end(
             success=task_success,
-            steps=current_task_step,
+            steps=1,
             score=task_score,
             rewards=step_rewards,
         )
