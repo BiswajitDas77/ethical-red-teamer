@@ -12,19 +12,13 @@ RUN useradd -m -u 1000 appuser
 
 WORKDIR /app
 
-# Install dependencies
-COPY server/requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir -r /app/requirements.txt
-
-# Copy source files
-COPY models.py   /app/models.py
-COPY tasks.py    /app/tasks.py
-COPY server/     /app/server/
-# client.py is optional and was omitted from upload
+# Copy source files first (better layer caching)
+COPY models.py tasks.py /app/
+COPY server/ /app/server/
 COPY openenv.yaml /app/openenv.yaml
 
-# Create server __init__.py if missing
-RUN touch /app/server/__init__.py
+# Install dependencies
+RUN pip install --no-cache-dir -r /app/server/requirements.txt
 
 # Switch to non-root user
 RUN chown -R appuser:appuser /app

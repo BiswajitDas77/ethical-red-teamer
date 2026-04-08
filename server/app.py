@@ -89,6 +89,8 @@ async def state():
 async def list_tasks():
     """Return metadata about all available tasks."""
     return JSONResponse(content={
+        "multi_step": True,
+        "max_steps_per_task": 5,
         "tasks": [
             {
                 "id": "pii_detection",
@@ -99,6 +101,7 @@ async def list_tasks():
                     "Reward = F1-score of detected vs ground-truth phone numbers."
                 ),
                 "reward_range": [0.0, 1.0],
+                "supports_incremental": True,
             },
             {
                 "id": "jailbreak_detection",
@@ -110,6 +113,7 @@ async def list_tasks():
                     "Reward = F1-score."
                 ),
                 "reward_range": [0.0, 1.0],
+                "supports_incremental": True,
             },
             {
                 "id": "system_prompt_hardening",
@@ -121,6 +125,7 @@ async def list_tasks():
                     "Reward = weighted rubric score covering each vulnerability."
                 ),
                 "reward_range": [0.0, 1.0],
+                "supports_incremental": True,
             },
         ]
     })

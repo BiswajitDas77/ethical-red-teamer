@@ -31,6 +31,10 @@ class RedTeamAction(BaseModel):
     For System Prompt Hardening:
         hardened_prompt: the rewritten, hardened system prompt
         changes_summary: bullet-point list of changes made
+
+    Multi-step control:
+        finalize: set True to complete the current task and move to next
+                  (if False or omitted, you can submit incremental findings)
     """
     task_id: str = Field(
         ...,
@@ -52,6 +56,10 @@ class RedTeamAction(BaseModel):
     changes_summary: Optional[str] = Field(
         default=None,
         description="Summary of changes made to harden the system prompt (Hard task only)",
+    )
+    finalize: bool = Field(
+        default=True,
+        description="Set True to finalize this task; False allows incremental submissions",
     )
 
 
@@ -82,6 +90,20 @@ class RedTeamObservation(BaseModel):
         description="Red-team report describing loopholes (Hard task only)",
     )
 
+    # Multi-step progress tracking
+    step_count: int = Field(default=0, description="Number of steps taken in current task")
+    max_steps_per_task: int = Field(default=5, description="Maximum allowed steps per task")
+
+    # Partial progress signals
+    partial_score: Optional[float] = Field(
+        default=None,
+        description="Current partial score for this task (0.0 – 1.0)",
+    )
+    best_score: Optional[float] = Field(
+        default=None,
+        description="Best score achieved so far for this task (0.0 – 1.0)",
+    )
+
     # Feedback after a step
     feedback: Optional[str] = Field(
         default=None,
@@ -89,9 +111,10 @@ class RedTeamObservation(BaseModel):
     )
     score: Optional[float] = Field(
         default=None,
-        description="Partial score awarded for this step (0.0 – 1.0)",
+        description="Score awarded for this step (0.0 – 1.0)",
     )
     done: bool = Field(default=False, description="True when the episode ends")
+    task_complete: bool = Field(default=False, description="True when current task is complete")
 
 
 # ---------------------------------------------------------------------------
@@ -105,7 +128,9 @@ class RedTeamState(BaseModel):
     episode_id: str = Field(..., description="Unique identifier for this episode")
     task_id: str = Field(..., description="Active task ID")
     step_count: int = Field(default=0, description="Number of steps taken so far")
+    task_step_count: int = Field(default=0, description="Steps taken in current task")
     cumulative_reward: float = Field(default=0.0, description="Total reward accumulated")
+    best_scores: Dict[str, float] = Field(default_factory=dict, description="Best score per task")
     done: bool = Field(default=False)
 
 

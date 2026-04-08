@@ -11,6 +11,8 @@ tags:
   - pii-detection
   - jailbreak
   - ethics
+multi_step: true
+max_steps_per_task: 5
 tasks:
   - id: pii_detection
     name: "Easy: PII Detection"

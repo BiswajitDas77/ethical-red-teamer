@@ -76,9 +76,28 @@ ethical-red-teamer/
   "findings": ["(415) 867-5309", "+1-800-555-0100"],
   "reasoning": "optional explanation",
   "hardened_prompt": null,
-  "changes_summary": null
+  "changes_summary": null,
+  "finalize": true
 }
 ```
+
+#### Multi-Step Tasks with Partial Progress
+
+The environment supports **multi-step tasks** with partial progress rewards:
+
+- **`finalize: true`** (default): Complete the current task and move to the next
+- **`finalize: false`**: Submit incremental findings and continue improving
+
+Each task allows up to **5 steps**. The agent receives:
+- `partial_score`: Current score for this submission
+- `best_score`: Best score achieved so far on this task
+- `step_count`: Current step number in the task
+- `max_steps_per_task`: Maximum allowed steps (5)
+
+This enables agents to:
+1. Submit initial findings and get feedback
+2. Refine their analysis based on partial scores
+3. Finalize when satisfied or continue improving
 
 ### Observation Schema
 
@@ -89,9 +108,14 @@ ethical-red-teamer/
   "difficulty": "easy",
   "instructions": "...",
   "dataset_sample": "10000 lines of text...",
-  "feedback": null,
-  "score": null,
-  "done": false
+  "step_count": 1,
+  "max_steps_per_task": 5,
+  "partial_score": 0.67,
+  "best_score": 0.67,
+  "feedback": "Found 10 of 15 phone numbers...",
+  "score": 0.67,
+  "done": false,
+  "task_complete": false
 }
 ```
 
@@ -150,6 +174,12 @@ docker run -p 7860:7860 ethical-red-teamer
 
 ## 📊 Reward Functions
 
+All tasks support **multi-step submissions with partial progress rewards**:
+- Agents can submit findings incrementally (`finalize: false`)
+- Each step returns a `partial_score` and `best_score`
+- Maximum 5 steps per task (prevents infinite loops)
+- Best score across all attempts is retained
+
 ### Task 1 — PII Detection (Easy)
 - **Metric:** F1-score (Precision × Recall) over detected phone numbers
 - **Ground truth:** 15 phone numbers embedded in 10,000 clean lines
@@ -194,9 +224,10 @@ these kinds of red-team exercises internally before releasing models.
 
 | Variable | Required | Description |
 |----------|---------|-------------|
-| `API_BASE_URL` | ✅ | OpenAI-compatible LLM endpoint |
-| `MODEL_NAME` | ✅ | Model identifier |
-| `HF_TOKEN` | ✅ | Hugging Face / API key |
+| `API_BASE_URL` | ✅ | OpenAI-compatible LLM endpoint (default: `https://api-inference.huggingface.co/v1`) |
+| `MODEL_NAME` | ✅ | Model identifier (default: `meta-llama/Llama-3.1-8B-Instruct`) |
+| `HF_TOKEN` | ✅ | Hugging Face API token (used as `API_KEY`) |
+| `API_KEY` | Optional | Alternative to `HF_TOKEN` for custom endpoints |
 | `ENV_BASE_URL` | Optional | URL of this deployed Space (default: `http://localhost:8000`) |
 
 ---
