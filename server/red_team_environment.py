@@ -105,15 +105,16 @@ class RedTeamEnvironment:
         # Reset cumulative tracking
         self._cumulative_findings = {}
         self._task_step_counts = {task_id: 0 for task_id in TASK_ORDER}
-        self._task_best_scores = {task_id: 0.0 for task_id in TASK_ORDER}
+        # Start best scores at 0.01 instead of 0.0 to satisfy validator
+        self._task_best_scores = {task_id: 0.01 for task_id in TASK_ORDER}
 
         self._state = RedTeamState(
             episode_id=episode_id,
             task_id=TASK_ORDER[0],
             step_count=0,
             task_step_count=0,
-            cumulative_reward=0.0,
-            best_scores={task_id: 0.0 for task_id in TASK_ORDER},
+            cumulative_reward=0.01, # Start with valid non-zero reward
+            best_scores={task_id: 0.01 for task_id in TASK_ORDER},
             done=False,
         )
 
@@ -162,7 +163,7 @@ class RedTeamEnvironment:
 
         if finalize:
             # Use the best score achieved as final reward
-            final_score = self._task_best_scores[task_id]
+            final_score = self._strict_unit_interval(self._task_best_scores[task_id])
             self._state.cumulative_reward = round(
                 self._state.cumulative_reward + final_score, 4
             )
@@ -205,24 +206,31 @@ class RedTeamEnvironment:
         else:
             # Continue with same task, return partial progress
             self._state.task_step_count = task_step
+            # Clamp progress scores
+            clamped_partial = self._strict_unit_interval(partial_score)
+            clamped_best = self._strict_unit_interval(self._task_best_scores[task_id])
+            
             obs = self._make_observation(
                 task_id=task_id,
-                feedback=f"{feedback}\n[Partial progress: score={partial_score:.2f}, step {task_step}/{MAX_STEPS_PER_TASK}]",
-                score=partial_score,
+                feedback=f"{feedback}\n[Partial progress: score={clamped_partial:.2f}, step {task_step}/{MAX_STEPS_PER_TASK}]",
+                score=clamped_partial,
             )
-            obs.partial_score = partial_score
-            obs.best_score = self._task_best_scores[task_id]
+            obs.partial_score = clamped_partial
+            obs.best_score = clamped_best
+
+        # Ensure reward is also clamped
+        step_reward = clamped_partial if not finalize else final_score
 
         return StepResult(
             observation=obs,
-            reward=partial_score if not finalize else final_score,
+            reward=step_reward,
             done=finalize and self._state.done,
             info={
                 "task_id": task_id,
                 "step": self._state.step_count,
                 "task_step": task_step,
-                "partial_score": partial_score,
-                "best_score": self._task_best_scores[task_id],
+                "partial_score": clamped_partial,
+                "best_score": clamped_best if not finalize else final_score,
                 "cumulative_reward": self._state.cumulative_reward,
                 "feedback": feedback,
                 "finalized": finalize,
@@ -248,6 +256,10 @@ class RedTeamEnvironment:
         meta = TASK_META[task_id]
         task_step = self._task_step_counts.get(task_id, 0)
 
+        # Enforce strict range (0, 1) for all returned scores
+        clamped_score = self._strict_unit_interval(score) if score is not None else None
+        clamped_best = self._strict_unit_interval(self._task_best_scores.get(task_id, 0.01))
+
         if task_id == "pii_detection":
             return RedTeamObservation(
                 task_id=task_id,
@@ -256,11 +268,11 @@ class RedTeamEnvironment:
                 instructions=TASK_PII_INSTRUCTIONS,
                 dataset_sample=self._pii_dataset,
                 feedback=feedback,
-                score=score,
+                score=clamped_score,
                 step_count=task_step,
                 max_steps_per_task=MAX_STEPS_PER_TASK,
-                partial_score=score,
-                best_score=self._task_best_scores.get(task_id, 0.0),
+                partial_score=clamped_score,
+                best_score=clamped_best,
                 done=False,
                 task_complete=False,
             )
@@ -272,11 +284,11 @@ class RedTeamEnvironment:
                 instructions=TASK_JAILBREAK_INSTRUCTIONS,
                 dataset_sample=self._jailbreak_dataset,
                 feedback=feedback,
-                score=score,
+                score=clamped_score,
                 step_count=task_step,
                 max_steps_per_task=MAX_STEPS_PER_TASK,
-                partial_score=score,
-                best_score=self._task_best_scores.get(task_id, 0.0),
+                partial_score=clamped_score,
+                best_score=clamped_best,
                 done=False,
                 task_complete=False,
             )
@@ -289,11 +301,11 @@ class RedTeamEnvironment:
                 system_prompt_to_audit=VULNERABLE_SYSTEM_PROMPT,
                 red_team_report=RED_TEAM_REPORT,
                 feedback=feedback,
-                score=score,
+                score=clamped_score,
                 step_count=task_step,
                 max_steps_per_task=MAX_STEPS_PER_TASK,
-                partial_score=score,
-                best_score=self._task_best_scores.get(task_id, 0.0),
+                partial_score=clamped_score,
+                best_score=clamped_best,
                 done=False,
                 task_complete=False,
             )
@@ -336,3 +348,11 @@ class RedTeamEnvironment:
         step_reward = reward  # Use actual score as step reward
 
         return step_reward, feedback, reward
+
+    def _strict_unit_interval(self, value: float) -> float:
+        """
+        Clamp scores/rewards to the open interval (0, 1) to satisfy 
+        the hackathon validator requirement.
+        """
+        epsilon = 0.01
+        return float(max(epsilon, min(1.0 - epsilon, float(value))))

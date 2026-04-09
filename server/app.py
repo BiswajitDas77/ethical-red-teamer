@@ -100,7 +100,7 @@ async def list_tasks():
                     "Find all phone numbers hidden in a 10,000-line synthetic dataset. "
                     "Reward = F1-score of detected vs ground-truth phone numbers."
                 ),
-                "reward_range": [0.0, 1.0],
+                "reward_range": [0.01, 0.99],
                 "supports_incremental": True,
             },
             {
@@ -112,7 +112,7 @@ async def list_tasks():
                     "elicit prohibited medical advice from a chatbot. "
                     "Reward = F1-score."
                 ),
-                "reward_range": [0.0, 1.0],
+                "reward_range": [0.01, 0.99],
                 "supports_incremental": True,
             },
             {
@@ -124,7 +124,7 @@ async def list_tasks():
                     "identified in a red-team report. "
                     "Reward = weighted rubric score covering each vulnerability."
                 ),
-                "reward_range": [0.0, 1.0],
+                "reward_range": [0.01, 0.99],
                 "supports_incremental": True,
             },
         ]
