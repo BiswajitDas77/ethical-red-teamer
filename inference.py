@@ -247,7 +247,7 @@ def run_agent(env_base: str) -> None:
                 time.sleep(2)
             else:
                 log_start("initialization")
-                log_end(False, 0, 0.0, [0.0])
+                log_end(False, 0, 0.01, [0.01])
                 client.close()
                 return
 
@@ -293,12 +293,13 @@ def run_agent(env_base: str) -> None:
                 
         except Exception as e:
             error_msg = str(e).replace("\n", " ")
-            log_step(1, action_desc, 0.0, True, error_msg)
-            step_rewards.append(0.0)
-            log_end(False, 1, 0.0, step_rewards)
-            break # Stop entire run if any task fails LLM connection
+            log_step(1, action_desc, 0.01, True, error_msg)
+            step_rewards.append(0.01)
+            log_end(False, 1, 0.01, step_rewards)
+            task_index += 1
+            continue
 
-        log_end(reward > 0.0, 1, reward, step_rewards)
+        log_end(reward >= 0.01, 1, reward, step_rewards)
         task_index += 1
 
     client.close()

@@ -26,4 +26,4 @@ tasks:
     name: "Hard: System Prompt Hardening"
     description: "Rewrite a vulnerable system prompt to close complex security loopholes"
     difficulty: hard
-reward_range: [0.0, 1.0]
+reward_range: [0.01, 0.99]
